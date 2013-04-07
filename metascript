@@ -1,0 +1,177 @@
+#!/bin/bash
+
+#?
+# Name: MetaScript
+# Version: 0.1
+# Author: Thomas Leberbauer
+#
+# Usage: metascript OPTIONS FILE
+# 
+# Parses headers that can be included in any file 
+# to describe its content and usage. 
+#
+# MetaScript notation starts with "#?". Every following line can 
+# contain a header and a header value like so "Key: Value". 
+# The key is an arbitrary name, some names have a special meaning 
+# and are processed by metascript. The list of headers is terminated 
+# by the first line containing nothing but whitespace. 
+# Everything in comments after that line is printed as is. 
+#
+# Headers:
+#     Name     Script name
+#     Version  Script version
+#     Uses     Names of packages required by the script
+#
+# Example script:
+#     #!/bin/bash
+#
+#     #?
+#     # Name: Example
+#     # Version: 0.1
+#     # Uses: pdftk 
+#     # 
+#     # Usage: example_script FILE [ FILE ... ]
+#     
+#     pdftk "$@"
+#
+# Example script that prints usage with and without MetaScript installed:
+#     #!/bin/bash
+#
+#     print_usage() {
+#     sed -re '1d;s/^#\s?//g' <<METASCRIPT
+#     #?
+#     # Name: Example
+#     # Version: 0.1
+#     # Uses: pdftk 
+#     # 
+#     # Usage: example_script FILE [ FILE ... ]
+#     METASCRIPT
+#     }
+#
+#     metascript "$0" 2>/dev/null || print_usage
+#
+# Options:
+#     -p   Use a different prefix for line comments
+#          instead of the default "#". 
+#     -i   Install packages required to run FILE
+#          instead of printing its meta information. 
+#     -h   Print this usage information. 
+# 
+# Exit status:
+#     1    File does not exist
+#     2    File is not readable
+#     3    Other errors
+
+self_cmd="$0"
+
+print_usage() {
+   $self_cmd "$self_cmd"
+}
+
+prefix="#"
+install_dependencies=false
+while getopts :ihp: opt; do
+  case "$opt" in
+    i) install_dependencies=true ;;
+    p) prefix="$OPTARG" ;;
+    h) print_usage; exit ;;
+    :) echo "Option $OPTARG requires an argument" 1>&2; exit ;;
+    \?) echo "Unknown option $OPTARG" 1>&2; exit ;;
+    *) echo "Unknown option $opt" 1>&2; exit ;;
+  esac
+done
+shift $(($OPTIND - 1))
+
+if [ "$#" -eq 0 ]; then
+  print_usage
+  exit
+fi
+
+[ ! -e "$1" ] && exit 1
+[ ! -r "$1" ] && exit 2
+
+self_file="`basename \"$1\"`"
+
+install_dependencies() {
+  if [ -z "$meta_Uses" ]; then
+    echo "There are no packages required to run $self_file"
+    exit
+  else
+    if [ "$EUID" -eq 0 ]; then
+      # Install commands of different package managers
+      local apt_get_cmd="apt-get --no-upgrade install"
+      local pacman_cmd="pacman -S --needed"
+      local yum_cmd="yum install"
+
+      for cmd in {apt-get,pacman,yum}; do
+        if type "$cmd" > /dev/null; then
+          local cmd_var="${cmd/[^a-zA-Z]/_}_cmd"
+          ${!cmd_var} $meta_Uses
+          exit
+        fi
+        echo "Unable to find a supported package manager. "
+        echo "You need to install these dependencies manually:"
+        echo "$meta_Uses"
+      done
+    else
+      echo "To install dependencies MetaScript must be run as root" 1>&2
+      exit 3
+    fi
+  fi
+}
+
+end_of_headers() {
+  if $install_dependencies; then
+    echo "Installing dependencies..."
+    install_dependencies
+    exit
+  fi
+  if [ ! -z "$meta_Name" -a ! -z "$meta_Version" ]; then
+    echo "$meta_Name ($meta_Version)"
+  fi
+}
+
+sy_meta_prefix="${prefix}"
+sy_meta_prefix_length=${#sy_meta_prefix}
+sy_meta_prefix_skip=$(($sy_meta_prefix_length + 1))
+sy_meta_start="${prefix}?"
+sy_meta_start_length=${#sy_meta_start}
+
+state=none
+while read -r line; do
+  case "$state" in
+    none) 
+      if [ "${line:0:${sy_meta_start_length}}" == "$sy_meta_start" ]; then
+        state=meta
+      fi
+      ;;
+    meta) 
+      if [[ $line =~ ^#\s*$ ]]; then
+        state=plain
+        end_of_headers
+      elif [ "${line:0:${sy_meta_prefix_length}}" == "$sy_meta_prefix" ]; then
+        key=`echo "$line" | sed -e 's/^#\s*//;s/:.*$//;s/\s//g'`
+        value=`echo "$line" | sed -e 's/^#[^:]*:\s*//'`
+        declare "meta_$key"="$value"
+      else
+        end_of_headers
+        exit
+      fi
+      ;;
+    plain) 
+      #if [ "${line:0:1}" == "$sy_meta_prefix" ]; then
+      if [ "${line:0:${sy_meta_prefix_length}}" == "$sy_meta_prefix" ]; then
+        if [ "${line:0:${sy_meta_prefix_skip}}" == "$sy_meta_prefix " ]; then
+          line="${line:${sy_meta_prefix_skip}}"
+        else
+          line="${line:${sy_meta_prefix_length}}"
+        fi
+        echo "$line"
+      else
+        exit 0
+      fi
+      ;;
+  esac
+done < "$1"
+
+end_of_headers
