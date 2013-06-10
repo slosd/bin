@@ -20,6 +20,8 @@ sed -re '1d;s/^#\s?//g' <<METASCRIPT
 METASCRIPT
 }
 
+CONF_SCREEN_KEYBOARD_ENABLED="/org/gnome/desktop/a11y/applications/screen-keyboard-enabled"
+
 is_in_tablet_mode() {
   local mode="`cat /sys/devices/platform/thinkpad_acpi/hotkey_tablet_mode`"
   if [[ "$mode" == "1" ]]; then
@@ -61,6 +63,13 @@ set_input() {
   done
 }
 
+set_on_screen_keyboard() {
+    case "$1" in
+        enable) dconf write "$CONF_SCREEN_KEYBOARD_ENABLED" true ;;
+        disable) dconf write "$CONF_SCREEN_KEYBOARD_ENABLED" false ;;
+    esac
+}
+
 rotate_normal() {
   set_randr normal
   set_wacom none
@@ -86,9 +95,11 @@ autorotate() {
       rotate_landscape
     fi
     set_input disable
+    set_on_screen_keyboard enable
   else
     rotate_normal
     set_input enable
+    set_on_screen_keyboard disable
   fi
 }
 
