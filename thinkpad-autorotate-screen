@@ -116,11 +116,14 @@ done
 # adjust for current setting
 autorotate "$rotation"
 
+
 # listen for changes
 acpi_listen | while read event; do
   if [[ 
         $event == "ibm/hotkey HKEY 00000080 00005009" # tablet
      || $event == "ibm/hotkey HKEY 00000080 0000500a" # laptop
+     || $event == "video/tabletmode TBLT 0000008A 00000000"
+     || $event == "video/tabletmode TBLT 0000008A 00000001"
      ]]; then
     autorotate "$rotation"
   fi
